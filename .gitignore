@@ -1,0 +1,78 @@
+##############################################
+#  Node.js (backend)
+##############################################
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+.pnpm-store/
+
+# Environment secrets
+.env
+.env.*
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# Build output
+dist/
+build/
+out/
+.cache/
+.nyc_output/
+
+# Test coverage
+coverage/
+
+# REPL & runtime files
+.pids/
+*.pid
+*.seed
+*.pid.lock
+node-repl-history
+.node_repl_history
+
+# TypeScript
+*.tsbuildinfo
+
+##############################################
+#  React (frontend)
+##############################################
+
+# React environment
+*.env
+*.env.*
+.env.local
+.env.production.local
+.env.development.local
+
+# React build
+/build
+/.next
+/.out
+/.vercel
+
+# React static cache
+.cache/
+.eslintcache
+
+##############################################
+#  IDE / Editor files
+##############################################
+
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+##############################################
+#  OS files
+##############################################
+
+.DS_Store
+Thumbs.db

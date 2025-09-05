@@ -1,0 +1,41 @@
+
+services:
+  bot-service:
+    build: ./services/bot-service
+    container_name: bot_service
+    ports:
+      - "3001:3001"
+    env_file: .env
+    restart: unless-stopped
+
+  nlp-service:
+    build: ./services/nlp-service
+    container_name: nlp_service
+    ports:
+      - "3002:3002"
+    env_file: .env
+    restart: unless-stopped
+
+  reminder-service:
+    build: ./services/reminder-service
+    container_name: reminder_service
+    ports:
+      - "3003:3003"
+    env_file: .env
+    restart: unless-stopped
+
+  database-service:
+    build: ./services/database-service
+    container_name: database_service
+    ports:
+      - "3004:3004"
+    env_file: .env
+    restart: unless-stopped
+
+  scheduler-service:
+    build: ./services/scheduler-service
+    container_name: scheduler_service
+    ports:
+      - "3005:3005"
+    env_file: .env
+    restart: unless-stopped
