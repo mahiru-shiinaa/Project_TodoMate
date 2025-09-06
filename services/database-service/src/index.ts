@@ -1,4 +1,4 @@
-// ===== services/database-service/src/index.ts =====
+// ===== services/database-service/src/index.ts - IMPROVED VERSION =====
 import express from 'express';
 import dotenv from 'dotenv';
 import { connectDatabase } from './db';
@@ -110,8 +110,27 @@ app.get('/tasks/user/:userId', async (req, res) => {
     const limitNum = parseInt(limit as string);
     const skip = (pageNum - 1) * limitNum;
     
+    // Improved sorting: pending tasks first (by due date), then completed tasks (by completion time)
+    const sortCriteria: any = {};
+    
+    if (filter === 'today' || filter === 'tomorrow') {
+      // For today/tomorrow, sort by status priority then by due date
+      sortCriteria.status = 1; // pending first, then completed
+      sortCriteria.dueDate = 1;
+    } else if (status === 'pending') {
+      // For pending only, sort by due date (overdue first)
+      sortCriteria.dueDate = 1;
+    } else if (status === 'completed') {
+      // For completed only, sort by completion date (most recent first)
+      sortCriteria.updatedAt = -1;
+    } else {
+      // For all tasks, complex sorting: pending (by due date), then completed (by update time)
+      sortCriteria.status = 1;
+      sortCriteria.dueDate = 1;
+    }
+    
     const tasks = await Task.find(query)
-      .sort({ dueDate: 1 })
+      .sort(sortCriteria)
       .skip(skip)
       .limit(limitNum);
     
@@ -231,9 +250,14 @@ app.patch('/tasks/reminders/sent', async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', service: 'Database Service' });
+});
+
 // Start server
 connectDatabase().then(() => {
   app.listen(PORT, () => {
-    console.log(`🗄️  Database Service running on port ${PORT}`);
+    console.log(`🗄️ Database Service running on port ${PORT}`);
   });
 });

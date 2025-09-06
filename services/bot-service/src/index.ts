@@ -1,9 +1,9 @@
-// ===== services/bot-service/src/index.ts =====
+// ===== services/bot-service/src/index.ts - IMPROVED VERSION =====
 import TelegramBot from 'node-telegram-bot-api';
 import express from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay, isToday, isTomorrow, isYesterday } from 'date-fns';
 
 dotenv.config();
 
@@ -18,37 +18,106 @@ const REMINDER_SERVICE_URL = process.env.REMINDER_SERVICE_URL || 'http://reminde
 // Khởi tạo bot
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-// Command parser
-const parseCommand = (text: string) => {
-  const parts = text.split(' ');
-  const command = parts[0].toLowerCase();
-  const args = parts.slice(1);
-  return { command, args, fullText: text };
-};
-
 // Format task display
 const formatTask = (task: any) => {
   const formattedDate = format(new Date(task.dueDate), 'HH:mm dd-MM-yyyy');
-  const statusIcon = task.status === 'completed' ? '✅' : '⏳';
-  const overdueIcon = new Date(task.dueDate) < new Date() && task.status === 'pending' ? '🔴' : '';
+  const statusIcon = task.status === 'completed' ? '🥳' : '⏳';
+  const now = new Date();
+  const dueDate = new Date(task.dueDate);
+  const isOverdue = dueDate < now && task.status === 'pending';
+  const statusText = task.status === 'completed' ? 'Done' : (isOverdue ? 'Overdue' : 'Pending');
+  const overdueIcon = isOverdue ? ' 🔴' : '';
   
-  return `[${task.taskId}] 📝 ${task.taskContent}\n📅 ${formattedDate}\n${statusIcon} Trạng thái: ${task.status === 'pending' ? 'Pending' : 'Done'} ${overdueIcon}`;
+  return `[${task.taskId}] 📝 ${task.taskContent}\n📅 ${formattedDate}\n${statusIcon} Trạng thái: ${statusText}${overdueIcon}`;
 };
 
-// Format task list with pagination
-const formatTaskList = (data: any, title: string) => {
+// Group tasks by date and status
+const groupTasksByDateAndStatus = (tasks: any[]) => {
+  const grouped: { [date: string]: { pending: any[], overdue: any[], completed: any[] } } = {};
+  
+  tasks.forEach(task => {
+    const taskDate = format(new Date(task.dueDate), 'dd-MM-yyyy');
+    
+    if (!grouped[taskDate]) {
+      grouped[taskDate] = { pending: [], overdue: [], completed: [] };
+    }
+    
+    const now = new Date();
+    const dueDate = new Date(task.dueDate);
+    
+    if (task.status === 'completed') {
+      grouped[taskDate].completed.push(task);
+    } else if (dueDate < now) {
+      grouped[taskDate].overdue.push(task);
+    } else {
+      grouped[taskDate].pending.push(task);
+    }
+  });
+  
+  return grouped;
+};
+
+// Format grouped task list - UPDATED VERSION
+const formatGroupedTaskList = (data: any, title: string) => {
   if (!data.tasks || data.tasks.length === 0) {
     return `${title}:\n(Không có công việc nào được tìm thấy)`;
   }
 
+  const grouped = groupTasksByDateAndStatus(data.tasks);
+  const dates = Object.keys(grouped).sort();
+  
   let message = `${title} (Trang ${data.pagination.currentPage}/${data.pagination.totalPages}):\n\n`;
   
-  data.tasks.forEach((task: any) => {
-    message += formatTask(task) + '\n\n';
+  dates.forEach((dateStr, index) => {
+    const dateObj = new Date(dateStr.split('-').reverse().join('-'));
+    let dateLabel = `📅 Ngày: ${dateStr}`;
+    
+    if (isToday(dateObj)) {
+      dateLabel = `🌤️ Ngày: ${dateStr} (Hôm nay)`;
+    } else if (isTomorrow(dateObj)) {
+      dateLabel = `🌅 Ngày: ${dateStr} (Ngày mai)`;
+    } else if (isYesterday(dateObj)) {
+      dateLabel = `🌆 Ngày: ${dateStr} (Hôm qua)`;
+    }
+    
+    message += `${dateLabel}\n\n`;
+    
+    const dayTasks = grouped[dateStr];
+    
+    // Chưa hoàn thành
+    if (dayTasks.pending.length > 0) {
+      message += `💼 CHƯA HOÀN THÀNH:\n\n`;
+      dayTasks.pending.forEach(task => {
+        message += formatTask(task) + '\n\n';
+      });
+      message += '~~~~~~~~~~~~~~~~~~\n';
+    }
+    
+    // Quá hạn
+    if (dayTasks.overdue.length > 0) {
+      message += `🔴 QUÁ HẠN:\n\n`;
+      dayTasks.overdue.forEach(task => {
+        message += formatTask(task) + '\n\n';
+      });
+      message += '~~~~~~~~~~~~~~~~~~\n';
+    }
+    
+    // Hoàn thành
+    if (dayTasks.completed.length > 0) {
+      message += `✅ HOÀN THÀNH:\n\n`;
+      dayTasks.completed.forEach(task => {
+        message += formatTask(task) + '\n\n';
+      });
+      message += '~~~~~~~~~~~~~~~~~~\n';
+    }
+    
+    if (index < dates.length - 1) {
+      message += `---------------------------------------------\n`;
+    }
   });
 
   if (data.pagination.totalPages > 1) {
-    message += `📄 Trang ${data.pagination.currentPage}/${data.pagination.totalPages} - Tổng: ${data.pagination.total} công việc`;
+    message += `\n📄 Trang ${data.pagination.currentPage}/${data.pagination.totalPages} - Tổng: ${data.pagination.total} công việc`;
   }
 
   return message;
@@ -78,9 +147,57 @@ bot.onText(/\/help/, (msg) => {
 /search [từ khóa] - Tìm công việc.
 /update [id] [trường]=[giá trị mới] - Cập nhật công việc.
 /complete [id] - Đánh dấu hoàn thành.
-/delete [id] - Xóa công việc.`;
+/delete [id] - Xóa công việc.
+/instruct - Hướng dẫn chi tiết cách sử dụng.`;
 
   bot.sendMessage(chatId, helpMessage);
+});
+
+bot.onText(/\/instruct/, (msg) => {
+  const chatId = msg.chat.id;
+  const instructMessage = `📖 HƯỚNG DẪN CHI TIẾT:
+
+🆕 THÊM CÔNG VIỆC (/add):
+• /add nhắc tôi đi ngủ lúc 23:30 ngày 06/09/2025
+• /add học bài lúc 15 giờ hôm nay  
+• /add họp team sau 30 phút
+• /add mua sắm 2 giờ nữa
+• /add làm bài tập sáng nay
+• /add đi tắm tối mai
+• /add học bài trưa hôm sau
+
+✏️ CẬP NHẬT CÔNG VIỆC (/update):
+• /update 1 content=Đi ngủ sớm hơn
+• /update 2 deadline=2025-09-07T20:00:00.000Z
+• /update 3 status=completed
+
+✅ ĐÁNH DẤU HOÀN THÀNH:
+• /complete 1
+• /complete 5
+
+🗑️ XÓA CÔNG VIỆC:
+• /delete 1
+• /delete 3
+
+🔍 TÌM KIẾM:
+• /search đi ngủ
+• /search học bài
+• /search họp
+
+📅 LỌC THEO NGÀY:
+• /date 06-09-2025
+• /today (hôm nay)
+• /tomorrow (ngày mai)
+
+📋 XEM DANH SÁCH:
+• /list (tất cả)
+• /pending (chưa làm)
+• /done (đã làm)  
+• /overdue (quá hạn)
+
+💡 Mẹo: Bot hiểu tiếng Việt tự nhiên! Chỉ cần gõ /add + mô tả công việc + thời gian.`;
+
+  bot.sendMessage(chatId, instructMessage);
 });
 
 bot.onText(/\/add (.+)/, async (msg, match) => {
@@ -128,7 +245,7 @@ bot.onText(/\/list(\s+(\d+))?/, async (msg, match) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?page=${page}&limit=10`);
-    const message = formatTaskList(response.data, '📋 Tất cả công việc');
+    const message = formatGroupedTaskList(response.data, '📋 Tất cả công việc');
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching tasks:', error.response?.data || error.message);
@@ -143,7 +260,7 @@ bot.onText(/\/pending(\s+(\d+))?/, async (msg, match) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?status=pending&page=${page}&limit=10`);
-    const message = formatTaskList(response.data, '📋 Công việc chưa hoàn thành');
+    const message = formatGroupedTaskList(response.data, '📋 Công việc chưa hoàn thành');
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching pending tasks:', error.response?.data || error.message);
@@ -158,7 +275,7 @@ bot.onText(/\/done(\s+(\d+))?/, async (msg, match) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?status=completed&page=${page}&limit=10`);
-    const message = formatTaskList(response.data, '📋 Công việc đã hoàn thành');
+    const message = formatGroupedTaskList(response.data, '📋 Công việc đã hoàn thành');
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching completed tasks:', error.response?.data || error.message);
@@ -173,7 +290,7 @@ bot.onText(/\/overdue(\s+(\d+))?/, async (msg, match) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?filter=overdue&page=${page}&limit=10`);
-    const message = formatTaskList(response.data, '📋 Công việc quá hạn');
+    const message = formatGroupedTaskList(response.data, '📋 Công việc quá hạn');
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching overdue tasks:', error.response?.data || error.message);
@@ -188,7 +305,7 @@ bot.onText(/\/today/, async (msg) => {
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?filter=today`);
     const currentDate = format(new Date(), 'dd-MM-yyyy');
-    const message = formatTaskList(response.data, `📅 Công việc hôm nay (${currentDate})`);
+    const message = formatGroupedTaskList(response.data, `📅 Công việc hôm nay (${currentDate})`);
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching today tasks:', error.response?.data || error.message);
@@ -203,7 +320,7 @@ bot.onText(/\/tomorrow/, async (msg) => {
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?filter=tomorrow`);
     const tomorrowDate = format(new Date(Date.now() + 24 * 60 * 60 * 1000), 'dd-MM-yyyy');
-    const message = formatTaskList(response.data, `📅 Công việc ngày mai (${tomorrowDate})`);
+    const message = formatGroupedTaskList(response.data, `📅 Công việc ngày mai (${tomorrowDate})`);
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching tomorrow tasks:', error.response?.data || error.message);
@@ -222,7 +339,7 @@ bot.onText(/\/date\s+(\d{2}-\d{2}-\d{4})/, async (msg, match) => {
     const apiDate = `${year}-${month}-${day}`;
     
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?date=${apiDate}`);
-    const message = formatTaskList(response.data, `📅 Công việc ngày ${dateStr}`);
+    const message = formatGroupedTaskList(response.data, `📅 Công việc ngày ${dateStr}`);
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error fetching tasks by date:', error.response?.data || error.message);
@@ -237,7 +354,7 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?search=${encodeURIComponent(keyword)}`);
-    const message = formatTaskList(response.data, `🔍 Kết quả tìm kiếm cho "${keyword}"`);
+    const message = formatGroupedTaskList(response.data, `🔍 Kết quả tìm kiếm cho "${keyword}"`);
     bot.sendMessage(chatId, message);
   } catch (error: any) {
     console.error('Error searching tasks:', error.response?.data || error.message);
