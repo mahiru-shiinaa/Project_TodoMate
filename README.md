@@ -44,15 +44,14 @@ Dự án áp dụng **kiến trúc Microservices**, giúp hệ thống dễ mở
 Hệ thống được chia thành **5 service độc lập**, mỗi service có một vai trò riêng biệt:
 
 ```mermaid
-flowchart LR
-    User([User - Telegram]) -->|Message| Bot[1. Bot Service]
-    Bot -->|"/add [text]"| NLP[2. NLP Service]
-    NLP -->|{task, dueDate}| Bot
-    Bot -->|API Request| Reminder[3. Reminder Service]
-    Reminder -->|CRUD Ops| DB_Service[4. Database Service]
-    DB_Service <--> DB[(MongoDB)]
-    Scheduler[5. Scheduler Service] -->|Get Due Tasks| DB_Service
-    Scheduler -->|Send Reminder| Bot
+flowchart TB
+    User(["User"]) -- Gửi tin nhắn --> Bot["Telegram Bot Service"]
+    Bot -- Chuyển tiếp văn bảng --> NLP["NLP Service"]
+    NLP -- Trích xuất ý định/thực thể --> ReminderService["Reminder Service"]
+    ReminderService -- Lưu Task --> DB[("Database")]
+    ReminderService -- Yêu cầu tạo nhắc nhở --> Scheduler["Scheduler Service"]
+    Scheduler -- Kích hoạt nhắc nhở --> Bot
+    Bot -- Gửi thông báo --> User
 ````
 
 ### Các service:
