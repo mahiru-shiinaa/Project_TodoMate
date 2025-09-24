@@ -283,25 +283,30 @@ app.get('/tasks/due', async (req, res) => {
     const nowUTC = new Date(); // Server time (UTC)
     
     // Sử dụng .lean() để lấy plain objects
+    // QUAN TRỌNG: Chỉ lấy các task có status = 'pending'
     const tasks = await Task.find({
       'reminders.reminderTime': { $lte: nowUTC },
-      'reminders.sent': false
+      'reminders.sent': false,
+      'status': 'pending' // ← THÊM ĐIỀU KIỆN NÀY
     }).lean();
     
     const dueReminders = [];
     
     for (const task of tasks) {
-      for (const reminder of task.reminders) {
-        if (reminder.reminderTime <= nowUTC && !reminder.sent) {
-          dueReminders.push({
-            taskId: task.taskId,
-            userId: task.userId,
-            chatId: task.chatId,
-            taskContent: task.taskContent,
-            dueDate: convertToVietnamTime(task.dueDate), // Trả về giờ VN
-            reminderType: reminder.type,
-            reminderId: reminder._id
-          });
+      // Chỉ xử lý nếu task vẫn đang pending
+      if (task.status === 'pending') {
+        for (const reminder of task.reminders) {
+          if (reminder.reminderTime <= nowUTC && !reminder.sent) {
+            dueReminders.push({
+              taskId: task.taskId,
+              userId: task.userId,
+              chatId: task.chatId,
+              taskContent: task.taskContent,
+              dueDate: convertToVietnamTime(task.dueDate), // Trả về giờ VN
+              reminderType: reminder.type,
+              reminderId: reminder._id
+            });
+          }
         }
       }
     }
