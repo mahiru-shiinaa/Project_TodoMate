@@ -1,4 +1,4 @@
-// ===== services/reminder-service/src/index.ts =====
+// ===== services/reminder-service/src/index.ts - TIMEZONE FIXED =====
 import express from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
@@ -12,7 +12,20 @@ app.use(express.json());
 const PORT = process.env.REMINDER_SERVICE_PORT || 3003;
 const DATABASE_SERVICE_URL = process.env.DATABASE_SERVICE_URL || 'http://database-service:3004';
 
-// API tạo task mới
+// Hàm chuyển đổi từ giờ Việt Nam sang UTC
+const convertToUTC = (vietnamDate: Date): Date => {
+  const vietnamOffset = 7 * 60; // +7 giờ = 420 phút
+  return new Date(vietnamDate.getTime() - (vietnamOffset * 60000));
+};
+
+// Hàm chuyển đổi từ UTC sang giờ Việt Nam
+const convertToVietnamTime = (utcDate: Date): Date => {
+  const vietnamOffset = 7 * 60; // +7 giờ = 420 phút  
+  const utcTime = utcDate.getTime() + (utcDate.getTimezoneOffset() * 60000);
+  return new Date(utcTime + (vietnamOffset * 60000));
+};
+
+// API tạo task mới - đã sửa timezone
 app.post('/tasks', async (req, res) => {
   try {
     const { userId, chatId, taskContent, dueDate } = req.body;
@@ -21,26 +34,30 @@ app.post('/tasks', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
-    const dueDateObj = new Date(dueDate);
+    // dueDate nhận vào đã là giờ Việt Nam từ NLP service
+    const dueDateVN = new Date(dueDate);
     
-    // Tạo 2 reminders: 30 phút trước và đúng giờ
+    // Tạo 2 reminders: 30 phút trước và đúng giờ (theo giờ Việt Nam)
+    const reminderTime30Min = subMinutes(dueDateVN, 30);
+    const exactReminderTime = dueDateVN;
+    
     const reminders = [
       {
         type: '30_minutes',
-        reminderTime: subMinutes(dueDateObj, 30)
+        reminderTime: reminderTime30Min
       },
       {
-        type: 'exact_time',
-        reminderTime: dueDateObj
+        type: 'exact_time', 
+        reminderTime: exactReminderTime
       }
     ];
     
-    // Gửi đến database service
+    // Gửi đến database service (database service sẽ tự chuyển sang UTC)
     const response = await axios.post(`${DATABASE_SERVICE_URL}/tasks`, {
       userId,
       chatId,
       taskContent,
-      dueDate,
+      dueDate: dueDateVN.toISOString(), // Gửi như giờ VN
       reminders
     });
     
@@ -65,7 +82,7 @@ app.get('/tasks/user/:userId', async (req, res) => {
   }
 });
 
-// API cập nhật task
+// API cập nhật task - đã sửa timezone
 app.patch('/tasks/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params;
@@ -76,19 +93,23 @@ app.patch('/tasks/:taskId', async (req, res) => {
     if (field === 'content') {
       updates.taskContent = value;
     } else if (field === 'deadline') {
-      const newDueDate = new Date(value);
-      updates.dueDate = newDueDate;
+      // value là giờ Việt Nam từ user input
+      const newDueDateVN = new Date(value);
+      updates.dueDate = newDueDateVN.toISOString();
       
-      // Cập nhật lại reminders khi thay đổi deadline
+      // Cập nhật lại reminders theo giờ Việt Nam
+      const reminderTime30Min = subMinutes(newDueDateVN, 30);
+      const exactReminderTime = newDueDateVN;
+      
       updates.reminders = [
         {
           type: '30_minutes',
-          reminderTime: subMinutes(newDueDate, 30),
+          reminderTime: reminderTime30Min.toISOString(),
           sent: false
         },
         {
           type: 'exact_time',
-          reminderTime: newDueDate,
+          reminderTime: exactReminderTime.toISOString(),
           sent: false
         }
       ];
@@ -135,4 +156,5 @@ app.get('/health', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`⏰ Reminder Service running on port ${PORT}`);
+  console.log(`🌏 Using Vietnam timezone (UTC+7) for reminders`);
 });

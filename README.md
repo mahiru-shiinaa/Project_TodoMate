@@ -10,6 +10,9 @@ Dự án áp dụng **kiến trúc Microservices**, giúp hệ thống dễ mở
 
 ---
 
+## Đây là đồ án môn học CS 420K Môn Hệ Phân Tán
+## Bởi: Phạm Quốc Hiệu - 1936
+
 ## ✨ Tính năng chính
 
 - **Thêm công việc thông minh:** Nhập lệnh tự nhiên để thêm công việc.  

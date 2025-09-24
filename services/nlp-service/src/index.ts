@@ -1,4 +1,4 @@
-// ===== services/nlp-service/src/index.ts - IMPROVED VERSION =====
+// ===== services/nlp-service/src/index.ts - VIETNAM TIMEZONE VERSION =====
 import express from 'express';
 import dotenv from 'dotenv';
 import * as chrono from 'chrono-node';
@@ -10,7 +10,15 @@ app.use(express.json());
 
 const PORT = process.env.NLP_SERVICE_PORT || 3002;
 
-// Custom parser cho tiếng Việt
+// Hàm lấy thời gian hiện tại theo giờ Việt Nam
+const getVietnamTime = (): Date => {
+  const now = new Date();
+  const vietnamOffset = 7 * 60; // +7 giờ = 420 phút
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utcTime + (vietnamOffset * 60000));
+};
+
+// Custom parser cho tiếng Việt - sử dụng giờ Việt Nam
 const parseVietnameseTime = (text: string, refDate: Date) => {
   const patterns = [
     // Giờ:phút + ngày/tháng/năm
@@ -196,7 +204,7 @@ const cleanTaskContent = (text: string, timeText: string) => {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 };
 
-// API xử lý ngôn ngữ tự nhiên
+// API xử lý ngôn ngữ tự nhiên - SỬ DỤNG GIỜ VIỆT NAM
 app.post('/process', (req, res) => {
   try {
     const { text, refDate } = req.body;
@@ -205,7 +213,8 @@ app.post('/process', (req, res) => {
       return res.status(400).json({ error: 'Text is required' });
     }
     
-    const referenceDate = refDate ? new Date(refDate) : new Date();
+    // Sử dụng giờ Việt Nam làm reference date
+    const referenceDate = refDate ? new Date(refDate) : getVietnamTime();
     
     // Thử parser tiếng Việt trước
     const vietnameseResult = parseVietnameseTime(text, referenceDate);
@@ -228,19 +237,23 @@ app.post('/process', (req, res) => {
         matchText = chronoResult.text;
         taskContent = cleanTaskContent(text, matchText);
       } else {
-        // Nếu không tìm thấy thời gian, set default là 1 giờ sau
-        dueDate = new Date(referenceDate.getTime() + 60 * 60 * 1000);
+        // Nếu không tìm thấy thời gian, set default là 1 giờ sau (giờ Việt Nam)
+        const defaultTime = new Date(referenceDate);
+        defaultTime.setHours(defaultTime.getHours() + 1);
+        dueDate = defaultTime;
         taskContent = cleanTaskContent(text, '');
       }
     }
     
     res.json({
       taskContent,
-      dueDate: dueDate.toISOString(),
+      dueDate: dueDate.toISOString(), // Trả về như giờ Việt Nam (sẽ được xử lý đúng ở các service khác)
       debug: {
         originalText: text,
         matchedTime: matchText,
-        parsedBy: vietnameseResult ? 'vietnamese_parser' : 'chrono_node'
+        parsedBy: vietnameseResult ? 'vietnamese_parser' : 'chrono_node',
+        vietnamTime: getVietnamTime().toISOString(),
+        timezone: 'UTC+7 (Vietnam)'
       }
     });
     
@@ -252,9 +265,16 @@ app.post('/process', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', service: 'NLP Service' });
+  res.json({ 
+    status: 'OK', 
+    service: 'NLP Service',
+    timezone: 'UTC+7 (Vietnam)',
+    currentVietnamTime: getVietnamTime().toISOString()
+  });
 });
 
 app.listen(PORT, () => {
   console.log(`🧠 NLP Service running on port ${PORT}`);
+  console.log(`🌏 Using Vietnam timezone (UTC+7)`);
+  console.log(`⏰ Current Vietnam time: ${getVietnamTime().toISOString()}`);
 });
