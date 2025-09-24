@@ -1,4 +1,4 @@
-// ===== services/database-service/src/index.ts - USING .lean() =====
+// ===== services/database-service/src/index.ts - FIXED OVERDUE VERSION =====
 import express from 'express';
 import dotenv from 'dotenv';
 import { connectDatabase } from './db';
@@ -20,6 +20,14 @@ const getNextTaskId = async (userId: string): Promise<number> => {
     { upsert: true, new: true }
   );
   return counter.taskId;
+};
+
+// Hàm lấy thời gian hiện tại theo giờ Việt Nam
+const getVietnamTime = (): Date => {
+  const now = new Date();
+  const vietnamOffset = 7 * 60; // +7 giờ = 420 phút
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utcTime + (vietnamOffset * 60000));
 };
 
 // Hàm chuyển đổi từ UTC sang giờ Việt Nam (+7)
@@ -84,7 +92,7 @@ app.post('/tasks', async (req, res) => {
   }
 });
 
-// API lấy danh sách tasks với query parameters phức tạp
+// API lấy danh sách tasks với query parameters phức tạp - FIXED VERSION
 app.get('/tasks/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -104,15 +112,22 @@ app.get('/tasks/user/:userId', async (req, res) => {
       query.status = status;
     }
     
-    // Filter by date range - sử dụng UTC để query database
-    const nowVN = new Date(); // Giờ hiện tại theo giờ Việt Nam
-    const nowUTC = convertToUTC(nowVN);
+    // SỬ DỤNG VIETNAM TIME ĐỂ SO SÁNH
+    const nowVN = getVietnamTime(); // Giờ hiện tại theo giờ Việt Nam
+    const nowUTC = convertToUTC(nowVN); // Chuyển sang UTC để query database
     const todayVN = new Date(nowVN.getFullYear(), nowVN.getMonth(), nowVN.getDate());
     const todayUTC = convertToUTC(todayVN);
     const tomorrowUTC = new Date(todayUTC);
     tomorrowUTC.setDate(tomorrowUTC.getDate() + 1);
     
-    if (filter === 'today') {
+    // FIXED: Xử lý filter overdue chính xác
+    if (filter === 'overdue') {
+      console.log('🔍 Filtering overdue tasks...');
+      console.log('Current Vietnam time:', nowVN.toISOString());
+      console.log('Current UTC for query:', nowUTC.toISOString());
+      query.dueDate = { $lt: nowUTC };
+      query.status = 'pending'; // Chỉ lấy tasks pending và đã quá hạn
+    } else if (filter === 'today') {
       query.dueDate = {
         $gte: todayUTC,
         $lt: tomorrowUTC
@@ -124,9 +139,6 @@ app.get('/tasks/user/:userId', async (req, res) => {
         $gte: tomorrowUTC,
         $lt: dayAfterTomorrowUTC
       };
-    } else if (filter === 'overdue') {
-      query.dueDate = { $lt: nowUTC };
-      query.status = 'pending';
     } else if (date) {
       // Chuyển đổi date input từ giờ VN sang UTC
       const targetDateVN = new Date(date as string);
@@ -144,24 +156,28 @@ app.get('/tasks/user/:userId', async (req, res) => {
       query.taskContent = { $regex: search, $options: 'i' };
     }
     
+    console.log('📝 Database query:', JSON.stringify(query, null, 2));
+    
     const pageNum = parseInt(page as string);
     const limitNum = parseInt(limit as string);
     const skip = (pageNum - 1) * limitNum;
     
-    // Sorting
+    // Sorting - FIXED: Ưu tiên hiển thị overdue trước
     let sortCriteria: any = {};
     
-    if (filter === 'today' || filter === 'tomorrow') {
+    if (filter === 'overdue') {
+      sortCriteria = { dueDate: 1 }; // Sắp xếp theo thời gian, task quá hạn lâu nhất lên đầu
+    } else if (filter === 'today' || filter === 'tomorrow') {
       sortCriteria = { status: 1, dueDate: 1 };
     } else if (status === 'pending') {
       sortCriteria = { dueDate: 1 };
     } else if (status === 'completed') {
       sortCriteria = { updatedAt: -1 };
     } else {
+      // Cho /list và các trường hợp khác: hiển thị overdue trước
       sortCriteria = { 
-        dueDate: -1,
-        status: 1,
-        createdAt: -1
+        status: 1,  // pending trước completed
+        dueDate: 1  // sắp xếp theo thời gian
       };
     }
     
@@ -172,18 +188,26 @@ app.get('/tasks/user/:userId', async (req, res) => {
       .limit(limitNum)
       .lean();
     
+    console.log(`📊 Found ${tasks.length} tasks matching criteria`);
+    
     const total = await Task.countDocuments(query);
     const totalPages = Math.ceil(total / limitNum);
     
-    // Chuyển đổi timezone trong response
-    const tasksWithVNTime = tasks.map(task => ({
-      ...task,
-      dueDate: convertToVietnamTime(task.dueDate),
-      reminders: task.reminders.map((r: any) => ({
-        ...r,
-        reminderTime: convertToVietnamTime(r.reminderTime)
-      }))
-    }));
+    // Chuyển đổi timezone trong response và thêm overdue flag
+    const tasksWithVNTime = tasks.map(task => {
+      const taskVNTime = convertToVietnamTime(task.dueDate);
+      const isOverdue = taskVNTime < nowVN && task.status === 'pending';
+      
+      return {
+        ...task,
+        dueDate: taskVNTime,
+        isOverdue, // Thêm flag để frontend dễ xử lý
+        reminders: task.reminders.map((r: any) => ({
+          ...r,
+          reminderTime: convertToVietnamTime(r.reminderTime)
+        }))
+      };
+    });
     
     res.json({
       tasks: tasksWithVNTime,
@@ -277,10 +301,12 @@ app.delete('/tasks/:taskId', async (req, res) => {
   }
 });
 
-// API lấy reminders đã đến hạn
+// API lấy reminders đã đến hạn - FIXED VERSION
 app.get('/tasks/due', async (req, res) => {
   try {
     const nowUTC = new Date(); // Server time (UTC)
+    
+    console.log('🔍 Checking for due reminders at:', nowUTC.toISOString());
     
     // Sử dụng .lean() để lấy plain objects
     // QUAN TRỌNG: Chỉ lấy các task có status = 'pending'
@@ -289,6 +315,8 @@ app.get('/tasks/due', async (req, res) => {
       'reminders.sent': false,
       'status': 'pending' // ← THÊM ĐIỀU KIỆN NÀY
     }).lean();
+    
+    console.log(`📋 Found ${tasks.length} tasks with potential due reminders`);
     
     const dueReminders = [];
     
@@ -310,6 +338,8 @@ app.get('/tasks/due', async (req, res) => {
         }
       }
     }
+    
+    console.log(`📬 ${dueReminders.length} due reminders ready to send`);
     
     res.json(dueReminders);
   } catch (error) {
@@ -344,6 +374,7 @@ app.get('/health', (req, res) => {
 connectDatabase().then(() => {
   app.listen(PORT, () => {
     console.log(`🗄️ Database Service running on port ${PORT}`);
-    console.log(`🌐 Using Vietnam timezone (UTC+7)`);
+    console.log(`🌏 Using Vietnam timezone (UTC+7)`);
+    console.log(`⏰ Current Vietnam time: ${getVietnamTime().toISOString()}`);
   });
 });

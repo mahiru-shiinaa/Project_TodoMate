@@ -1,4 +1,4 @@
-// ===== services/bot-service/src/index.ts - IMPROVED VERSION =====
+// ===== services/bot-service/src/index.ts - FIXED OVERDUE VERSION =====
 import TelegramBot from 'node-telegram-bot-api';
 import express from 'express';
 import axios from 'axios';
@@ -18,22 +18,42 @@ const REMINDER_SERVICE_URL = process.env.REMINDER_SERVICE_URL || 'http://reminde
 // Khởi tạo bot
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-// Format task display
-const formatTask = (task: any) => {
-  const formattedDate = format(new Date(task.dueDate), 'HH:mm dd-MM-yyyy');
-  const statusIcon = task.status === 'completed' ? '🥳' : '⏳';
+// Hàm lấy thời gian hiện tại theo giờ Việt Nam
+const getVietnamTime = (): Date => {
   const now = new Date();
-  const dueDate = new Date(task.dueDate);
-  const isOverdue = dueDate < now && task.status === 'pending';
-  const statusText = task.status === 'completed' ? 'Done' : (isOverdue ? 'Overdue' : 'Pending');
-  const overdueIcon = isOverdue ? ' 🔴' : '';
-  
-  return `[${task.taskId}] 📝 ${task.taskContent}\n📅 ${formattedDate}\n${statusIcon} Trạng thái: ${statusText}${overdueIcon}`;
+  const vietnamOffset = 7 * 60; // +7 giờ = 420 phút
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utcTime + (vietnamOffset * 60000));
 };
 
-// Group tasks by date and status
+// Format task display - FIXED VERSION
+const formatTask = (task: any) => {
+  const formattedDate = format(new Date(task.dueDate), 'HH:mm dd-MM-yyyy');
+  const now = getVietnamTime(); // Sử dụng giờ Việt Nam
+  const dueDate = new Date(task.dueDate);
+  
+  // FIXED: Xác định trạng thái chính xác
+  let statusIcon = '⏳';
+  let statusText = 'Pending';
+  
+  if (task.status === 'completed') {
+    statusIcon = '🥳';
+    statusText = 'Done';
+  } else if (dueDate < now && task.status === 'pending') {
+    statusIcon = '🔴';
+    statusText = 'Overdue';
+  } else if (task.status === 'pending') {
+    statusIcon = '⏳';
+    statusText = 'Pending';
+  }
+  
+  return `[${task.taskId}] 📝 ${task.taskContent}\n📅 ${formattedDate}\n${statusIcon} Trạng thái: ${statusText}`;
+};
+
+// Group tasks by date and status - FIXED VERSION
 const groupTasksByDateAndStatus = (tasks: any[]) => {
   const grouped: { [date: string]: { pending: any[], overdue: any[], completed: any[] } } = {};
+  const now = getVietnamTime(); // Sử dụng giờ Việt Nam
   
   tasks.forEach(task => {
     const taskDate = format(new Date(task.dueDate), 'dd-MM-yyyy');
@@ -42,13 +62,13 @@ const groupTasksByDateAndStatus = (tasks: any[]) => {
       grouped[taskDate] = { pending: [], overdue: [], completed: [] };
     }
     
-    const now = new Date();
     const dueDate = new Date(task.dueDate);
     
     if (task.status === 'completed') {
       grouped[taskDate].completed.push(task);
-    } else if (dueDate < now) {
-      grouped[taskDate].overdue.push(task);
+    } else if (dueDate < now && task.status === 'pending') {
+      // FIXED: Đánh dấu rõ ràng là overdue
+      grouped[taskDate].overdue.push({...task, isOverdue: true});
     } else {
       grouped[taskDate].pending.push(task);
     }
@@ -84,19 +104,19 @@ const formatGroupedTaskList = (data: any, title: string) => {
     
     const dayTasks = grouped[dateStr];
     
-    // Chưa hoàn thành
-    if (dayTasks.pending.length > 0) {
-      message += `💼 CHƯA HOÀN THÀNH:\n\n`;
-      dayTasks.pending.forEach(task => {
+    // Quá hạn - HIỂN THỊ TRƯỚC
+    if (dayTasks.overdue.length > 0) {
+      message += `🔴 QUÁ HẠN:\n\n`;
+      dayTasks.overdue.forEach(task => {
         message += formatTask(task) + '\n\n';
       });
       message += '~~~~~~~~~~~~~~~~~~\n';
     }
     
-    // Quá hạn
-    if (dayTasks.overdue.length > 0) {
-      message += `🔴 QUÁ HẠN:\n\n`;
-      dayTasks.overdue.forEach(task => {
+    // Chưa hoàn thành
+    if (dayTasks.pending.length > 0) {
+      message += `💼 CHƯA HOÀN THÀNH:\n\n`;
+      dayTasks.pending.forEach(task => {
         message += formatTask(task) + '\n\n';
       });
       message += '~~~~~~~~~~~~~~~~~~\n';
@@ -209,7 +229,7 @@ bot.onText(/\/add (.+)/, async (msg, match) => {
     // Gửi đến NLP service để xử lý
     const nlpResponse = await axios.post(`${NLP_SERVICE_URL}/process`, {
       text,
-      refDate: new Date().toISOString()
+      refDate: getVietnamTime().toISOString() // Sử dụng giờ Việt Nam
     });
 
     const { taskContent, dueDate } = nlpResponse.data;
@@ -304,7 +324,7 @@ bot.onText(/\/today/, async (msg) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?filter=today`);
-    const currentDate = format(new Date(), 'dd-MM-yyyy');
+    const currentDate = format(getVietnamTime(), 'dd-MM-yyyy');
     const message = formatGroupedTaskList(response.data, `📅 Công việc hôm nay (${currentDate})`);
     bot.sendMessage(chatId, message);
   } catch (error: any) {
@@ -319,7 +339,9 @@ bot.onText(/\/tomorrow/, async (msg) => {
 
   try {
     const response = await axios.get(`${REMINDER_SERVICE_URL}/tasks/user/${userId}?filter=tomorrow`);
-    const tomorrowDate = format(new Date(Date.now() + 24 * 60 * 60 * 1000), 'dd-MM-yyyy');
+    const tomorrow = new Date(getVietnamTime());
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = format(tomorrow, 'dd-MM-yyyy');
     const message = formatGroupedTaskList(response.data, `📅 Công việc ngày mai (${tomorrowDate})`);
     bot.sendMessage(chatId, message);
   } catch (error: any) {
@@ -378,10 +400,10 @@ bot.onText(/\/update\s+(\d+)\s+(\w+)=(.+)/, async (msg, match) => {
 
     let successMessage = '';
     if (field === 'content') {
-      successMessage = `🔄 Task [${taskId}] đã được cập nhật nội dung:\n📝 ${value}`;
+      successMessage = `📄 Task [${taskId}] đã được cập nhật nội dung:\n📝 ${value}`;
     } else if (field === 'deadline') {
       const formattedDate = format(new Date(value), 'HH:mm dd-MM-yyyy');
-      successMessage = `🔄 Task [${taskId}] đã được cập nhật deadline:\n📅 ${formattedDate}`;
+      successMessage = `📄 Task [${taskId}] đã được cập nhật deadline:\n📅 ${formattedDate}`;
     }
 
     bot.sendMessage(chatId, successMessage);

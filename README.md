@@ -75,7 +75,7 @@ flowchart TB
 ### 1️⃣ Clone repository
 
 ```bash
-git clone <URL-repository-cua-ban>
+git clone https://github.com/mahiru-shiinaa/Project_TodoMate.git
 cd Project_TodoMate
 ```
 
